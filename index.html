@@ -54,13 +54,13 @@
     const fallHalf = fallRange * 0.5;
     for (let i = 0; i < particleCount; i++) {
       const r = Math.random() * 5 + 10;          // radial distance between 10 and 15
-      const angle = Math.random() * Math.PI * 4;   // swirl angle
+      const angle = Math.random() * Math.PI * 2;   // angle around the y-axis
       // y position is randomly within the vertical range
       const y = (Math.random() - 0.5) * fallRange;
       positions[i * 3]     = r * Math.cos(angle);
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = r * Math.sin(angle);
-      // Use individual speed only for the swirl (rotation)
+      // Use individual speed only for the rotation
       speeds[i] = (Math.random() * 0.5) + 0.5;
     }
     const geometry = new THREE.BufferGeometry();
@@ -85,17 +85,17 @@
       void main() {
           vec3 pos = position;
           
-          // --- 1) Rotate around X-axis (swirl in Y–Z plane) ---
-          float swirlAngle = uTime * 0.2 * aSpeed;
-          float cosA = cos(swirlAngle);
-          float sinA = sin(swirlAngle);
+          // Rotate around Y-axis (vertical column rotating around center)
+          float rotationAngle = uTime * 0.1;
+          float cosA = cos(rotationAngle);
+          float sinA = sin(rotationAngle);
           
           vec3 rotatedPosition;
-          rotatedPosition.y = cosA * pos.y - sinA * pos.z;
-          rotatedPosition.z = sinA * pos.y + cosA * pos.z;
-          rotatedPosition.x = pos.x;
+          rotatedPosition.x = cosA * pos.x - sinA * pos.z;
+          rotatedPosition.z = sinA * pos.x + cosA * pos.z;
+          rotatedPosition.y = pos.y;
           
-          // --- 2) Apply falling effect via modulo on rotatedPosition.y ---
+          // Apply falling effect via modulo on y position
           rotatedPosition.y = mod((rotatedPosition.y - uTime * 0.1) + 40.0, 80.0) - 40.0;
           
           // Compute fade factor based on the particle's original distance (for color blending)
