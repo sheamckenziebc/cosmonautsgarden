@@ -140,46 +140,69 @@
       attribute float aState;
       attribute float aSize;
       varying float vFade;
+      varying float vDistance;
       
       void main() {
           vec3 pos = position;
           vec3 finalPosition;
           
+          // Base rotation for all particles
+          float rotationAngle = uTime * 0.1;
+          float cosA = cos(rotationAngle);
+          float sinA = sin(rotationAngle);
+          
+          finalPosition.x = cosA * pos.x - sinA * pos.z;
+          finalPosition.z = sinA * pos.x + cosA * pos.z;
+          finalPosition.y = pos.y;
+          
+          // Apply falling effect via modulo on y position for particles in the column
           if (aState < 0.5) {
-              // Particle is in the column
-              // Rotate around Y-axis (vertical column rotating around center)
-              float rotationAngle = uTime * 0.1;
-              float cosA = cos(rotationAngle);
-              float sinA = sin(rotationAngle);
+            finalPosition.y = mod((finalPosition.y - uTime * 0.1) + 40.0, 80.0) - 40.0;
+          }
+          
+          // Mouse attraction - when mouse is pressed, particles are attracted based on distance
+          if (uMousePressed > 0.5) {
+            vec3 mouseDir = uMousePosition - finalPosition;
+            float dist = length(mouseDir);
+            float attractionRadius = 15.0;
+            
+            // Inverse square law with a cutoff radius
+            if (dist < attractionRadius) {
+              // Normalized attraction strength (1.0 at center, 0.0 at radius)
+              float normalizedDist = dist / attractionRadius;
+              float attractStrength = 0.8 * (1.0 - normalizedDist * normalizedDist);
               
-              finalPosition.x = cosA * pos.x - sinA * pos.z;
-              finalPosition.z = sinA * pos.x + cosA * pos.z;
-              finalPosition.y = pos.y;
+              // Apply attraction force
+              finalPosition += normalize(mouseDir) * attractStrength;
               
-              // Apply falling effect via modulo on y position
-              finalPosition.y = mod((finalPosition.y - uTime * 0.1) + 40.0, 80.0) - 40.0;
-              
-              // Mouse attraction - when mouse is pressed, particles can be pulled out
-              if (uMousePressed > 0.5) {
-                vec3 mouseDir = uMousePosition - finalPosition;
-                float dist = length(mouseDir);
-                float attractStrength = 0.5 * max(0.0, 1.0 - dist / 15.0);
-                if (attractStrength > 0.0) {
-                  finalPosition += normalize(mouseDir) * attractStrength;
-                }
+              // If particle is very close to mouse, mark it as "painted"
+              if (dist < 2.0) {
+                // This is now a painted particle
+                // We'll use the aState attribute to track this
+                // aState values: 0 = in column, 1 = painted/placed
               }
-          } else {
-              // Particle is being dragged/painted
-              finalPosition = pos; // Use the current position directly
+            }
           }
           
           // Compute fade factor based on the particle's original distance (for color blending)
           vFade = 1.0 - clamp(length(pos) / 60.0, 0.0, 1.0);
           
+          // Calculate distance to mouse for size variation
+          vDistance = length(uMousePosition - finalPosition);
+          
           // Transform to view space
           vec4 viewPos = modelViewMatrix * vec4(finalPosition, 1.0);
           gl_Position = projectionMatrix * viewPos;
-          gl_PointSize = aSize;
+          
+          // Vary size based on state and distance to mouse
+          float baseSize = aSize;
+          if (uMousePressed > 0.5 && vDistance < 15.0) {
+            // Increase size for particles near the mouse
+            float sizeFactor = 1.0 + (1.0 - vDistance / 15.0) * 2.0;
+            gl_PointSize = baseSize * sizeFactor;
+          } else {
+            gl_PointSize = baseSize;
+          }
       }
     `;
     
@@ -187,10 +210,19 @@
       uniform vec3 uColor1;
       uniform vec3 uColor2;
       varying float vFade;
+      varying float vDistance;
       
       void main() {
           vec3 color = mix(uColor2, uColor1, vFade);
-          gl_FragColor = vec4(color, 1.0);
+          
+          // Add slight brightness variation for particles near the mouse
+          float alpha = 1.0;
+          if (vDistance < 15.0) {
+            float brightnessFactor = 1.0 + (1.0 - vDistance / 15.0) * 0.5;
+            color *= brightnessFactor;
+          }
+          
+          gl_FragColor = vec4(color, alpha);
       }
     `;
     
@@ -244,20 +276,58 @@
         container.style.background = getRandomGradient();
       }
       
-      if (event.key.toLowerCase() === 'r' && draggedParticles.size > 0) {
+      if (event.key.toLowerCase() === 'r') {
+        // Reset all particles to their original positions in the column
         const positionAttribute = geometry.getAttribute('position');
         const stateAttribute = geometry.getAttribute('aState');
-        draggedParticles.forEach(index => {
-          positionAttribute.array[index * 3] = originalPositions[index * 3];
-          positionAttribute.array[index * 3 + 1] = originalPositions[index * 3 + 1];
-          positionAttribute.array[index * 3 + 2] = originalPositions[index * 3 + 2];
-          stateAttribute.array[index] = 0.0;
-        });
-        draggedParticles.clear();
+        const sizeAttribute = geometry.getAttribute('aSize');
+        
+        for (let i = 0; i < particleCount; i++) {
+          positionAttribute.array[i * 3] = originalPositions[i * 3];
+          positionAttribute.array[i * 3 + 1] = originalPositions[i * 3 + 1];
+          positionAttribute.array[i * 3 + 2] = originalPositions[i * 3 + 2];
+          stateAttribute.array[i] = 0.0; // Reset to column state
+          sizeAttribute.array[i] = 2.0; // Reset to default size
+        }
+        
         positionAttribute.needsUpdate = true;
         stateAttribute.needsUpdate = true;
+        sizeAttribute.needsUpdate = true;
       }
     });
+    
+    // Function to update particle states based on proximity to mouse
+    function updateParticleStates() {
+      if (!mousePressed) return;
+      
+      const positionAttribute = geometry.getAttribute('position');
+      const stateAttribute = geometry.getAttribute('aState');
+      const mousePos = uniforms.uMousePosition.value;
+      
+      // Mark particles that are very close to the mouse as "painted"
+      for (let i = 0; i < particleCount; i++) {
+        const px = positionAttribute.array[i * 3];
+        const py = positionAttribute.array[i * 3 + 1];
+        const pz = positionAttribute.array[i * 3 + 2];
+        
+        const particlePos = new THREE.Vector3(px, py, pz);
+        const distance = particlePos.distanceTo(mousePos);
+        
+        // If particle is very close to mouse and currently in the column, mark it as painted
+        if (distance < 2.0 && stateAttribute.array[i] < 0.5) {
+          stateAttribute.array[i] = 1.0; // Mark as painted/placed
+          
+          // Add slight random spread for a painterly effect
+          const spread = 0.5;
+          positionAttribute.array[i * 3] += (Math.random() - 0.5) * spread;
+          positionAttribute.array[i * 3 + 1] += (Math.random() - 0.5) * spread;
+          positionAttribute.array[i * 3 + 2] += (Math.random() - 0.5) * spread;
+        }
+      }
+      
+      positionAttribute.needsUpdate = true;
+      stateAttribute.needsUpdate = true;
+    }
     
     // =============================
     // Mouse Interaction with Particles
@@ -266,10 +336,8 @@
     const mouse = new THREE.Vector2();
     let mousePressed = false;
     let lastMousePosition = new THREE.Vector3();
-    const draggedParticles = new Set(); // Track which particles are being dragged
-    const maxDraggedParticles = 1000; // Maximum number of particles that can be dragged at once
-    const refillRate = 50; // Number of particles to refill per second
-    let lastRefillTime = 0;
+    const attractionRadius = 15; // Radius of attraction influence
+    const attractionStrengthFactor = 0.8; // Strength of attraction
     
     function updateMousePosition(event) {
       // Calculate mouse position in normalized device coordinates (-1 to +1)
@@ -285,68 +353,6 @@
       if (intersects.length > 0) {
         // Update the mouse position uniform with the intersection point
         uniforms.uMousePosition.value.copy(intersects[0].point);
-        
-        // If mouse is pressed, handle particle dragging
-        if (mousePressed && intersects.length > 0) {
-          const positionAttribute = geometry.getAttribute('position');
-          const stateAttribute = geometry.getAttribute('aState');
-          const mousePos = intersects[0].point;
-
-          // Attraction logic for new particles
-          if (draggedParticles.size < maxDraggedParticles) {
-            for (let i = 0; i < particleCount; i++) {
-              if (stateAttribute.array[i] < 0.5) { // Only particles in the column
-                const px = positionAttribute.array[i * 3];
-                const py = positionAttribute.array[i * 3 + 1];
-                const pz = positionAttribute.array[i * 3 + 2];
-                const particlePos = new THREE.Vector3(px, py, pz);
-                const distance = particlePos.distanceTo(mousePos);
-
-                // Smooth attraction radius (e.g., 10 units)
-                if (distance < 10 && draggedParticles.size < maxDraggedParticles) {
-                  const attractionStrength = (1 - distance / 10) * 0.2; // Smooth falloff
-                  particlePos.lerp(mousePos, attractionStrength); // Move toward mouse
-                  positionAttribute.array[i * 3] = particlePos.x;
-                  positionAttribute.array[i * 3 + 1] = particlePos.y;
-                  positionAttribute.array[i * 3 + 2] = particlePos.z;
-
-                  // Mark as dragged when close enough
-                  if (distance < 2) {
-                    stateAttribute.array[i] = 1.0;
-                    draggedParticles.add(i);
-                  }
-                }
-              }
-            }
-          }
-
-          // Update dragged particles to follow the mouse smoothly
-          draggedParticles.forEach(index => {
-            const px = positionAttribute.array[index * 3];
-            const py = positionAttribute.array[index * 3 + 1];
-            const pz = positionAttribute.array[index * 3 + 2];
-            const particlePos = new THREE.Vector3(px, py, pz);
-            particlePos.lerp(mousePos, 0.1); // Smoothly follow the mouse
-            
-            // Add slight random spread for a painterly effect
-            const spread = 0.5; // Adjust this value for more/less spread
-            particlePos.x += (Math.random() - 0.5) * spread;
-            particlePos.y += (Math.random() - 0.5) * spread;
-            particlePos.z += (Math.random() - 0.5) * spread;
-            
-            positionAttribute.array[index * 3] = particlePos.x;
-            positionAttribute.array[index * 3 + 1] = particlePos.y;
-            positionAttribute.array[index * 3 + 2] = particlePos.z;
-            
-            // Set larger, varied size for dragged particles
-            geometry.getAttribute('aSize').array[index] = 3.0 + Math.random() * 2.0;
-          });
-          
-          geometry.getAttribute('aSize').needsUpdate = true;
-
-          positionAttribute.needsUpdate = true;
-          stateAttribute.needsUpdate = true;
-        }
         
         // Update last mouse position for next frame
         lastMousePosition.copy(intersects[0].point);
@@ -365,11 +371,6 @@
       uniforms.uMousePressed.value = 0.0;
     });
     
-    // Function to refill particles in the column over time
-    function refillParticles(deltaTime) {
-      // Remove automatic refill logic; we'll trigger it manually
-    }
-    
     // =============================
     // 6) Animation Loop
     // =============================
@@ -381,8 +382,8 @@
       
       uniforms.uTime.value = elapsed;
       
-      // Refill particles over time
-      refillParticles(deltaTime);
+      // Update particle states based on proximity to mouse
+      updateParticleStates();
       
       // Gradually tween shader colors toward the target colors
       uniforms.uColor1.value.lerp(targetColor1, 0.05);
