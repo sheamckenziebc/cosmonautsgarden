@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <title>The Cosmonaut's Garden</title>
   <style>
+    @font-face {
+      font-family: 'PixelFont';
+      src: url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+      font-display: swap;
+    }
+    
     html, body {
       margin: 0;
       padding: 0;
@@ -38,11 +44,50 @@
       transform: translate(-50%, -50%); /* Center the cursor on the actual pointer position */
       transition: transform 0.05s ease-out; /* Slight smoothing effect */
     }
+    
+    /* Pixel Art Title Styling */
+    #title-container {
+      position: fixed;
+      top: 20px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      z-index: 100;
+      pointer-events: none; /* Allow clicks to pass through */
+    }
+    
+    #pixel-title {
+      font-family: 'Press Start 2P', monospace;
+      color: white;
+      font-size: 24px;
+      text-shadow: 2px 2px 0px #000, 
+                  -2px 2px 0px #000,
+                  2px -2px 0px #000,
+                  -2px -2px 0px #000;
+      letter-spacing: 1px;
+      padding: 10px;
+      display: inline-block;
+      background-color: rgba(0, 0, 0, 0.3);
+      border-radius: 4px;
+    }
+    
+    /* Remove the floating animation */
+    @keyframes float {
+      0% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+      100% { transform: translateY(0px); }
+    }
   </style>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 </head>
 <body>
   <!-- Three.js Scene Container -->
   <div id="scene-container"></div>
+  
+  <!-- Pixel Art Title -->
+  <div id="title-container">
+    <div id="pixel-title">THE COSMONAUT'S GARDEN</div>
+  </div>
   
   <!-- Custom Cursor Element -->
   <div id="cursor"></div>
@@ -78,7 +123,7 @@
     const container = document.getElementById('scene-container');
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 40; // Moved further back to see more of the scene
+    camera.position.z = 30; // Moved closer for a more immersive experience
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(renderer.domElement);
@@ -149,6 +194,7 @@
       attribute float aSize;
       varying float vFade;
       varying float vDistance;
+      varying float vState;
       
       // Function to rotate a point around an axis
       vec3 rotatePoint(vec3 point, vec3 axis, float angle) {
@@ -167,6 +213,9 @@
           vec3 pos = position;
           vec3 finalPosition;
           
+          // Pass the state to the fragment shader
+          vState = aState;
+          
           if (aState > 0.5) {
             // For painted particles, maintain their position but apply a horizontal-only rotation
             float globalRotationAngle = uTime * 0.05;
@@ -180,6 +229,8 @@
             finalPosition.x = pos.x * cosA - pos.z * sinA;
             finalPosition.z = pos.x * sinA + pos.z * cosA;
             finalPosition.y = pos.y; // Keep Y position unchanged
+            
+            // Painted particles are immune to further attraction
           } else {
             // For nebula particles, create a swirling, pulsing effect
             // Calculate distance from center
@@ -206,31 +257,26 @@
             
             // Combine pulsing with rotation
             finalPosition = normalize(rotated) * pulsedRadius;
-          }
-          
-          // Mouse attraction - when mouse is pressed, particles are attracted based on distance
-          if (uMousePressed > 0.5) {
-            vec3 mouseDir = uMousePosition - finalPosition;
-            float dist = length(mouseDir);
-            float attractionRadius = 10.0; // Reduced attraction radius
             
-            // Inverse square law with a cutoff radius
-            if (dist < attractionRadius) {
-              // Stronger attraction for closer particles with sharper falloff
-              float normalizedDist = dist / attractionRadius;
+            // Mouse attraction - only for nebula particles near the edge
+            if (uMousePressed > 0.5) {
+              vec3 mouseDir = uMousePosition - finalPosition;
+              float dist = length(mouseDir);
+              float attractionRadius = 5.0; // Very small attraction radius
               
-              // Use a stronger attraction force for painted particles to allow them to be pulled further
-              float attractStrength;
-              if (aState > 0.5) {
-                // Stronger attraction for painted particles
-                attractStrength = 2.5 * (1.0 - normalizedDist * normalizedDist);
-              } else {
-                // Normal attraction for nebula particles
-                attractStrength = 1.5 * (1.0 - normalizedDist * normalizedDist * normalizedDist);
+              // Only attract particles that are very close to the cursor
+              // AND near the edge of the nebula
+              float distanceToCenter = length(finalPosition);
+              bool isNearEdge = distanceToCenter > uNebulaRadius * 0.9 && distanceToCenter < uNebulaRadius;
+              
+              if (dist < attractionRadius && isNearEdge) {
+                // Strong attraction for very close particles with sharp falloff
+                float normalizedDist = dist / attractionRadius;
+                float attractStrength = 3.0 * (1.0 - normalizedDist * normalizedDist * normalizedDist * normalizedDist);
+                
+                // Apply attraction force
+                finalPosition += normalize(mouseDir) * attractStrength;
               }
-              
-              // Apply attraction force
-              finalPosition += normalize(mouseDir) * attractStrength;
             }
           }
           
@@ -246,9 +292,9 @@
           
           // Vary size based on state and distance to mouse
           float baseSize = aSize;
-          if (uMousePressed > 0.5 && vDistance < 10.0) { // Match the attraction radius
-            // Increase size for particles near the mouse
-            float sizeFactor = 1.0 + (1.0 - vDistance / 10.0) * 2.0;
+          if (uMousePressed > 0.5 && vDistance < 5.0 && aState < 0.5) {
+            // Increase size for nebula particles near the mouse
+            float sizeFactor = 1.0 + (1.0 - vDistance / 5.0) * 2.0;
             gl_PointSize = baseSize * sizeFactor;
           } else {
             gl_PointSize = baseSize;
@@ -262,6 +308,7 @@
       uniform float uTime;
       varying float vFade;
       varying float vDistance;
+      varying float vState;
       
       void main() {
           // Create a circular particle shape with soft edges
@@ -271,17 +318,21 @@
           // Mix colors based on fade value
           vec3 color = mix(uColor2, uColor1, vFade);
           
-          // Add slight brightness variation for particles near the mouse
-          float brightness = 1.0;
-          if (vDistance < 10.0) {
-            brightness += (1.0 - vDistance / 10.0) * 0.5;
+          // Make painted particles visually distinct
+          if (vState > 0.5) {
+            // Painted particles have a brighter, more saturated appearance
+            color *= 1.3; // Brighter
+            color = mix(color, vec3(1.0, 1.0, 1.0), 0.2); // Slightly more white
+          } else {
+            // Add slight brightness variation for nebula particles near the mouse
+            if (vDistance < 5.0) {
+              color *= 1.0 + (1.0 - vDistance / 5.0) * 0.5;
+            }
+            
+            // Add subtle pulsing glow effect for nebula particles
+            color *= 1.0 + sin(uTime * 0.5) * 0.1;
           }
           
-          // Add subtle pulsing glow effect
-          brightness += sin(uTime * 0.5) * 0.1;
-          
-          // Apply brightness and circle mask
-          color *= brightness;
           float alpha = circle;
           
           gl_FragColor = vec4(color, alpha);
@@ -358,92 +409,6 @@
       }
     });
     
-    // Function to update particle states based on proximity to mouse
-    function updateParticleStates() {
-      if (!mousePressed) return;
-      
-      const positionAttribute = geometry.getAttribute('position');
-      const stateAttribute = geometry.getAttribute('aState');
-      const mousePos = uniforms.uMousePosition.value;
-      
-      // First, update positions of already painted particles that are near the mouse
-      for (let i = 0; i < particleCount; i++) {
-        // Only process painted particles
-        if (stateAttribute.array[i] > 0.5) {
-          const px = positionAttribute.array[i * 3];
-          const py = positionAttribute.array[i * 3 + 1];
-          const pz = positionAttribute.array[i * 3 + 2];
-          
-          const particlePos = new THREE.Vector3(px, py, pz);
-          const distanceToMouse = particlePos.distanceTo(mousePos);
-          
-          // If painted particle is very close to mouse, allow direct manipulation
-          if (distanceToMouse < 3.0) {
-            // Move particle directly toward mouse position with some smoothing
-            const moveStrength = 0.2; // Smoothing factor
-            const newPos = particlePos.lerp(mousePos, moveStrength);
-            
-            // Update position
-            positionAttribute.array[i * 3] = newPos.x;
-            positionAttribute.array[i * 3 + 1] = newPos.y;
-            positionAttribute.array[i * 3 + 2] = newPos.z;
-            
-            // Add slight random spread for a painterly effect
-            const spread = 0.2;
-            positionAttribute.array[i * 3] += (Math.random() - 0.5) * spread;
-            positionAttribute.array[i * 3 + 1] += (Math.random() - 0.5) * spread;
-            positionAttribute.array[i * 3 + 2] += (Math.random() - 0.5) * spread;
-          }
-        }
-      }
-      
-      // Then, mark nebula particles that should be painted
-      for (let i = 0; i < particleCount; i++) {
-        // Skip particles that are already painted
-        if (stateAttribute.array[i] > 0.5) continue;
-        
-        const px = positionAttribute.array[i * 3];
-        const py = positionAttribute.array[i * 3 + 1];
-        const pz = positionAttribute.array[i * 3 + 2];
-        
-        const particlePos = new THREE.Vector3(px, py, pz);
-        const distanceToMouse = particlePos.distanceTo(mousePos);
-        const distanceToCenter = particlePos.length(); // Distance from origin (center of nebula)
-        
-        // If particle is very close to mouse and currently in the nebula
-        if (distanceToMouse < 2.0) {
-          // Mark as painted/placed
-          stateAttribute.array[i] = 1.0;
-          
-          // Add slight random spread for a painterly effect
-          const spread = 0.5;
-          positionAttribute.array[i * 3] += (Math.random() - 0.5) * spread;
-          positionAttribute.array[i * 3 + 1] += (Math.random() - 0.5) * spread;
-          positionAttribute.array[i * 3 + 2] += (Math.random() - 0.5) * spread;
-          
-          // If the particle is still inside the nebula, push it outward
-          // This ensures particles can be tugged beyond the sphere's radius
-          if (distanceToCenter < nebulaRadius) {
-            const dirFromCenter = particlePos.clone().normalize();
-            const pushOutDistance = nebulaRadius * 1.1 - distanceToCenter;
-            
-            // Push the particle outward beyond the nebula boundary
-            positionAttribute.array[i * 3] += dirFromCenter.x * pushOutDistance;
-            positionAttribute.array[i * 3 + 1] += dirFromCenter.y * pushOutDistance;
-            positionAttribute.array[i * 3 + 2] += dirFromCenter.z * pushOutDistance;
-          }
-        }
-        // If particle has been pulled beyond the original nebula radius
-        else if (distanceToCenter > nebulaRadius * 1.1) {
-          // Mark as painted/placed when it exceeds the nebula boundary
-          stateAttribute.array[i] = 1.0;
-        }
-      }
-      
-      positionAttribute.needsUpdate = true;
-      stateAttribute.needsUpdate = true;
-    }
-    
     // =============================
     // Mouse Interaction with Particles
     // =============================
@@ -451,8 +416,9 @@
     const mouse = new THREE.Vector2();
     let mousePressed = false;
     let lastMousePosition = new THREE.Vector3();
-    const attractionRadius = 10; // Reduced radius of attraction influence
-    const attractionStrengthFactor = 1.5; // Increased strength for closer particles
+    const attractionRadius = 5; // Very small radius of attraction influence
+    const attractionStrengthFactor = 3.0; // Stronger attraction for closer particles
+    let currentlyDraggingParticles = new Set(); // Track particles being actively dragged
     
     function updateMousePosition(event) {
       // Calculate mouse position in normalized device coordinates (-1 to +1)
@@ -466,11 +432,24 @@
       const intersects = raycaster.intersectObject(particleSystem);
       
       if (intersects.length > 0) {
-        // Update the mouse position uniform with the intersection point
-        uniforms.uMousePosition.value.copy(intersects[0].point);
+        // Get the intersection point
+        const intersectionPoint = intersects[0].point;
+        
+        // Calculate distance from center
+        const distanceFromCenter = intersectionPoint.length();
+        
+        // If the cosmonaut is inside the sphere, push it to the edge
+        if (distanceFromCenter < nebulaRadius * 1.1) {
+          // Normalize the direction and set the position to be on the sphere's edge
+          const direction = intersectionPoint.clone().normalize();
+          intersectionPoint.copy(direction.multiplyScalar(nebulaRadius * 1.1));
+        }
+        
+        // Update the mouse position uniform with the adjusted intersection point
+        uniforms.uMousePosition.value.copy(intersectionPoint);
         
         // Update last mouse position for next frame
-        lastMousePosition.copy(intersects[0].point);
+        lastMousePosition.copy(intersectionPoint);
       }
     }
     
@@ -479,12 +458,104 @@
     document.addEventListener('mousedown', function() {
       mousePressed = true;
       uniforms.uMousePressed.value = 1.0;
+      // Clear the set of currently dragging particles on new click
+      currentlyDraggingParticles.clear();
     });
     
     document.addEventListener('mouseup', function() {
       mousePressed = false;
       uniforms.uMousePressed.value = 0.0;
+      // Clear the set of currently dragging particles on release
+      currentlyDraggingParticles.clear();
     });
+    
+    // Function to update particle states based on proximity to mouse
+    function updateParticleStates() {
+      if (!mousePressed) return;
+      
+      const positionAttribute = geometry.getAttribute('position');
+      const stateAttribute = geometry.getAttribute('aState');
+      const mousePos = uniforms.uMousePosition.value;
+      
+      // First, update positions of particles that are currently being dragged
+      currentlyDraggingParticles.forEach(index => {
+        const px = positionAttribute.array[index * 3];
+        const py = positionAttribute.array[index * 3 + 1];
+        const pz = positionAttribute.array[index * 3 + 2];
+        
+        const particlePos = new THREE.Vector3(px, py, pz);
+        
+        // Move particle toward mouse position with some smoothing
+        const moveStrength = 0.3;
+        const newPos = particlePos.lerp(mousePos, moveStrength);
+        
+        // Update position
+        positionAttribute.array[index * 3] = newPos.x;
+        positionAttribute.array[index * 3 + 1] = newPos.y;
+        positionAttribute.array[index * 3 + 2] = newPos.z;
+        
+        // Add slight random spread for a painterly effect
+        const spread = 0.2;
+        positionAttribute.array[index * 3] += (Math.random() - 0.5) * spread;
+        positionAttribute.array[index * 3 + 1] += (Math.random() - 0.5) * spread;
+        positionAttribute.array[index * 3 + 2] += (Math.random() - 0.5) * spread;
+      });
+      
+      // Then, find new particles to attract from the sphere's edge
+      // Only look at particles that are still in the nebula (state = 0)
+      for (let i = 0; i < particleCount; i++) {
+        // Skip particles that are already painted or currently being dragged
+        if (stateAttribute.array[i] > 0.5 || currentlyDraggingParticles.has(i)) continue;
+        
+        const px = positionAttribute.array[i * 3];
+        const py = positionAttribute.array[i * 3 + 1];
+        const pz = positionAttribute.array[i * 3 + 2];
+        
+        const particlePos = new THREE.Vector3(px, py, pz);
+        const distanceToMouse = particlePos.distanceTo(mousePos);
+        const distanceToCenter = particlePos.length(); // Distance from origin (center of nebula)
+        
+        // Only attract particles that are:
+        // 1. Near the edge of the nebula (within 90-100% of radius)
+        // 2. Close to the mouse position
+        const isNearEdge = distanceToCenter > nebulaRadius * 0.9 && distanceToCenter < nebulaRadius;
+        const isCloseToMouse = distanceToMouse < 5.0;
+        
+        if (isNearEdge && isCloseToMouse) {
+          // Add to the currently dragging set
+          currentlyDraggingParticles.add(i);
+          
+          // Move particle toward mouse position
+          const moveStrength = 0.5;
+          const newPos = particlePos.lerp(mousePos, moveStrength);
+          
+          // Update position
+          positionAttribute.array[i * 3] = newPos.x;
+          positionAttribute.array[i * 3 + 1] = newPos.y;
+          positionAttribute.array[i * 3 + 2] = newPos.z;
+          
+          // Add slight random spread
+          const spread = 0.3;
+          positionAttribute.array[i * 3] += (Math.random() - 0.5) * spread;
+          positionAttribute.array[i * 3 + 1] += (Math.random() - 0.5) * spread;
+          positionAttribute.array[i * 3 + 2] += (Math.random() - 0.5) * spread;
+          
+          // If the particle is now outside the nebula, mark it as painted
+          const newDistanceToCenter = Math.sqrt(
+            positionAttribute.array[i * 3] * positionAttribute.array[i * 3] +
+            positionAttribute.array[i * 3 + 1] * positionAttribute.array[i * 3 + 1] +
+            positionAttribute.array[i * 3 + 2] * positionAttribute.array[i * 3 + 2]
+          );
+          
+          if (newDistanceToCenter > nebulaRadius * 1.1) {
+            stateAttribute.array[i] = 1.0; // Mark as painted
+          }
+        }
+      }
+      
+      positionAttribute.needsUpdate = true;
+      stateAttribute.needsUpdate = true;
+    }
     
     // =============================
     // 6) Animation Loop
