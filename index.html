@@ -114,11 +114,15 @@
     uniforms = {
       uTime:   { value: 0 },
       uColor1: { value: new THREE.Color('#0ed2f7') },
-      uColor2: { value: new THREE.Color('#ffffff') }
+      uColor2: { value: new THREE.Color('#ffffff') },
+      uMousePosition: { value: new THREE.Vector3(0, 0, 0) },
+      uMousePressed: { value: 0.0 }
     };
     
     const vertexShader = `
       uniform float uTime;
+      uniform vec3 uMousePosition;
+      uniform float uMousePressed;
       attribute float aSpeed;
       varying float vFade;
       
@@ -137,6 +141,16 @@
           
           // Apply falling effect via modulo on y position
           rotatedPosition.y = mod((rotatedPosition.y - uTime * 0.1) + 40.0, 80.0) - 40.0;
+          
+          // Mouse interaction - push particles away when mouse is pressed
+          if (uMousePressed > 0.5) {
+            vec3 mouseDir = rotatedPosition - uMousePosition;
+            float dist = length(mouseDir);
+            float pushStrength = 5.0 * max(0.0, 1.0 - dist / 10.0);
+            if (pushStrength > 0.0) {
+              rotatedPosition += normalize(mouseDir) * pushStrength;
+            }
+          }
           
           // Compute fade factor based on the particle's original distance (for color blending)
           vFade = 1.0 - clamp(length(pos) / 60.0, 0.0, 1.0);
@@ -182,7 +196,7 @@
     }
     
     // =============================
-    // 5) Dynamic Color & Background Changes on Click
+    // 5) Dynamic Color & Background Changes on Keystroke 'D'
     // =============================
     let targetColor1 = uniforms.uColor1.value.clone();
     let targetColor2 = uniforms.uColor2.value.clone();
@@ -202,10 +216,48 @@
       }
     }
     
-    document.addEventListener('click', function() {
-      targetColor1 = new THREE.Color(generateRandomHexColor());
-      targetColor2 = new THREE.Color(generateRandomHexColor());
-      container.style.background = getRandomGradient();
+    document.addEventListener('keydown', function(event) {
+      if (event.key.toLowerCase() === 'd') {
+        targetColor1 = new THREE.Color(generateRandomHexColor());
+        targetColor2 = new THREE.Color(generateRandomHexColor());
+        container.style.background = getRandomGradient();
+      }
+    });
+    
+    // =============================
+    // Mouse Interaction with Particles
+    // =============================
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let mousePressed = false;
+    
+    function updateMousePosition(event) {
+      // Calculate mouse position in normalized device coordinates (-1 to +1)
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      
+      // Update the raycaster with the mouse position
+      raycaster.setFromCamera(mouse, camera);
+      
+      // Calculate the point of intersection with the particle system
+      const intersects = raycaster.intersectObject(particleSystem);
+      
+      if (intersects.length > 0) {
+        // Update the mouse position uniform with the intersection point
+        uniforms.uMousePosition.value.copy(intersects[0].point);
+      }
+    }
+    
+    document.addEventListener('mousemove', updateMousePosition);
+    
+    document.addEventListener('mousedown', function() {
+      mousePressed = true;
+      uniforms.uMousePressed.value = 1.0;
+    });
+    
+    document.addEventListener('mouseup', function() {
+      mousePressed = false;
+      uniforms.uMousePressed.value = 0.0;
     });
     
     // =============================
