@@ -11,6 +11,7 @@
       overflow: hidden;
       background: #000;
       font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      cursor: none; /* Hide the default cursor */
     }
     /* Container for Three.js Canvas with a gradient background that transitions */
     #scene-container {
@@ -23,14 +24,53 @@
       background: radial-gradient(circle at center, #070b34, #000 80%);
       transition: background 2s ease;
     }
+    
+    /* Custom cursor styling */
+    #cursor {
+      position: fixed;
+      width: 32px;
+      height: 32px;
+      background-image: url('images/sprite1.png');
+      background-size: contain;
+      background-repeat: no-repeat;
+      pointer-events: none; /* Ensures the cursor doesn't interfere with clicks */
+      z-index: 9999;
+      transform: translate(-50%, -50%); /* Center the cursor on the actual pointer position */
+      transition: transform 0.05s ease-out; /* Slight smoothing effect */
+    }
   </style>
 </head>
 <body>
   <!-- Three.js Scene Container -->
   <div id="scene-container"></div>
+  
+  <!-- Custom Cursor Element -->
+  <div id="cursor"></div>
+  
   <!-- Three.js (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
   <script>
+    // =============================
+    // Custom Cursor Implementation
+    // =============================
+    const cursor = document.getElementById('cursor');
+    
+    document.addEventListener('mousemove', (e) => {
+      // Update cursor position with the mouse
+      cursor.style.left = e.clientX + 'px';
+      cursor.style.top = e.clientY + 'px';
+    });
+    
+    // Hide cursor when mouse leaves the window
+    document.addEventListener('mouseout', () => {
+      cursor.style.display = 'none';
+    });
+    
+    // Show cursor when mouse enters the window
+    document.addEventListener('mouseover', () => {
+      cursor.style.display = 'block';
+    });
+    
     // =============================
     // 1) Scene & Camera Setup
     // =============================
